@@ -955,6 +955,10 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
                         }
                     }
                 }
+		#ifdef GGML_USE_CPU_HBM 
+		auto *buft_hbm = ggml_backend_cpu_hbm_buffer_type();
+		buft_list["CPU_HBM"] = buft_hbm;
+                 #endif
                 auto override_group_span_len = std::strcspn(value, ",");
                 bool last_group = false;
                 do {

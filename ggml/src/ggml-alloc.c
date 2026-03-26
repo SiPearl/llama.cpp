@@ -10,6 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef GGML_USE_CPU_HBM
+#include <memkind_hbw.h>
+#include <memkind.h>
+#include <hbwmalloc.h>
+#endif
+
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MAX_FREE_BLOCKS 256
 
@@ -1121,7 +1127,11 @@ static void free_buffers(ggml_backend_buffer_t ** buffers, const size_t * n_buff
     for (size_t i = 0; i < *n_buffers; i++) {
         ggml_backend_buffer_free((*buffers)[i]);
     }
-    free(*buffers);
+#ifdef GGML_USE_CPU_HBM
+    memkind_free(NULL, *buffers);
+#else
+free(*buffers);
+#endif
 }
 
 static bool alloc_tensor_range(struct ggml_context * ctx,
@@ -1136,7 +1146,16 @@ static bool alloc_tensor_range(struct ggml_context * ctx,
         return false;
     }
 
-    *buffers = realloc(*buffers, sizeof(ggml_backend_buffer_t) * (*n_buffers + 1));
+    
+    if (strcmp(ggml_backend_buft_name(buft),"CPU_HBM")==0)
+	{ 
+         #ifdef GGML_USE_CPU_HBM
+		memkind_t kind_hbm=get_hbw_interleave_all_kind();
+		*buffers =memkind_realloc(kind_hbm ,  *buffers, sizeof(ggml_backend_buffer_t) * (*n_buffers + 1) );   
+	#endif
+	}
+	else{ *buffers = realloc(*buffers, sizeof(ggml_backend_buffer_t) * (*n_buffers + 1));}//sizeof(ggml_backend_buffer_t) * (*n_buffer)
+
     (*buffers)[(*n_buffers)++] = buffer;
 
     struct ggml_tallocr tallocr = ggml_tallocr_new(buffer);
@@ -1224,7 +1243,15 @@ static ggml_backend_buffer_t ggml_backend_alloc_ctx_tensors_from_buft_impl(
         buffer = ggml_backend_multi_buffer_alloc_buffer(buffers, n_buffers);
     }
     if (buffers) {
-        free(buffers); // can be NULL if context is empty or no_alloc
+    
+	    if (strcmp(ggml_backend_buft_name(buft),"CPU_HBM")==0)
+	{ 
+	#ifdef GGML_USE_CPU_HBM
+	  memkind_free(NULL,buffers);//hbw_free(buffers);
+	#endif
+	} 
+	else{ free(buffers);}
+
     }
     return buffer;
 }

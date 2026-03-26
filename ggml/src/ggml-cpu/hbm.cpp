@@ -8,6 +8,7 @@
 #include "hbm.h"
 
 // buffer type HBM
+#include <memkind.h>
 
 #include <hbwmalloc.h>
 
@@ -16,15 +17,44 @@ static const char * ggml_backend_cpu_hbm_buffer_type_get_name(ggml_backend_buffe
 
     GGML_UNUSED(buft);
 }
+static bool ggml_backend_hbm_buft_is_host(ggml_backend_buffer_type_t buft) {
+	return true;
+
+	GGML_UNUSED(buft);
+
+}
+static size_t ggml_backend_hbm_buffer_type_get_alignment(ggml_backend_buffer_type_t buft) {
+    return TENSOR_ALIGNMENT;
+
+    GGML_UNUSED(buft);
+}
 
 static void ggml_backend_cpu_hbm_buffer_free_buffer(ggml_backend_buffer_t buffer) {
-    hbw_free(buffer->context);
+	memkind_free(NULL,buffer->context);
 }
+
+memkind_t get_hbw_interleave_all_kind()
+{
+	static memkind_t hbw_interleave_all_kind=[](){
+         memkind_t kind;
+
+
+  int init_err =memkind_create_kind( MEMKIND_MEMTYPE_HIGH_BANDWIDTH, MEMKIND_POLICY_INTERLEAVE_ALL,  memkind_bits_t(0), &kind); //or MEMKIND_POLICY_BIND_ALL
+
+  if (init_err) { char errmsg[256];
+	 memkind_error_message(init_err, errmsg, sizeof(errmsg));
+  } 
+        return kind;}();
+
+	return hbw_interleave_all_kind;
+	}
 
 static ggml_backend_buffer_t ggml_backend_cpu_hbm_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft,
                                                                            size_t                     size) {
     void * ptr;
-    int    result = hbw_posix_memalign(&ptr, ggml_backend_cpu_buffer_type_get_alignment(buft), size);
+    memkind_t hbm_all_kind=get_hbw_interleave_all_kind();
+    //if(memkind_check_available(hbm_all_kind)!=0) std::cout<<"requrested kind isn't available ######## \n"<<std::endl; 
+    int result=memkind_posix_memalign(hbm_all_kind,&ptr, ggml_backend_hbm_buffer_type_get_alignment(buft), size); 
     if (result != 0) {
         GGML_LOG_ERROR("failed to allocate HBM buffer of size %zu\n", size);
         return NULL;
@@ -42,10 +72,10 @@ ggml_backend_buffer_type_t ggml_backend_cpu_hbm_buffer_type(void) {
         /* .iface    = */ {
                            /* .get_name         = */ ggml_backend_cpu_hbm_buffer_type_get_name,
                            /* .alloc_buffer     = */ ggml_backend_cpu_hbm_buffer_type_alloc_buffer,
-                           /* .get_alignment    = */ ggml_backend_cpu_buffer_type_get_alignment,
+                           /* .get_alignment    = */ ggml_backend_hbm_buffer_type_get_alignment,
                            /* .get_max_size     = */ nullptr,  // defaults to SIZE_MAX
                            /* .get_alloc_size   = */ nullptr,  // defaults to ggml_nbytes
-                           /* .is_host          = */ ggml_backend_cpu_buffer_type_is_host,
+                           /* .is_host          = */ ggml_backend_hbm_buft_is_host,
                            },
         /* .context  = */ nullptr,
     };

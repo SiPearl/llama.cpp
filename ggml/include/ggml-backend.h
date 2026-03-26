@@ -2,7 +2,9 @@
 
 #include "ggml.h"
 #include "ggml-alloc.h"
-
+#ifdef GGML_USE_CPU_HBM
+#include <memkind.h>
+#endif
 #ifdef GGML_BACKEND_SHARED
 #    if defined(_WIN32) && !defined(__MINGW32__)
 #        ifdef GGML_BACKEND_BUILD
@@ -431,6 +433,10 @@ extern "C" {
     // CPU buffer types are always available
     GGML_API ggml_backend_buffer_t      ggml_backend_cpu_buffer_from_ptr(void * ptr, size_t size);
     GGML_API ggml_backend_buffer_type_t ggml_backend_cpu_buffer_type(void);
+    GGML_API ggml_backend_buffer_type_t ggml_backend_cpu_hbm_buffer_type(void);
+    #ifdef GGML_USE_CPU_HBM
+    memkind_t get_hbw_interleave_all_kind();
+    #endif
 
 #ifdef  __cplusplus
 }

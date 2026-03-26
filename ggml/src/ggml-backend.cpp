@@ -23,6 +23,11 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef GGML_CPU_HBM
+#include <hbwmalloc.h>
+#include <memkind.h>
+#endif
+
 #ifdef __APPLE__
 #include <sys/types.h>
 #include <sys/sysctl.h>

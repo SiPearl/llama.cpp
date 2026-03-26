@@ -53,6 +53,10 @@
 #define GGML_COMMON_DECL_CPP
 #include "ggml-common.h"
 
+#ifdef GGML_USE_CPU_HBM
+#include "hbm.h"
+#endif
+
 static constexpr int      GGML_KLEIDIAI_MAX_KERNEL_SLOTS = 2;
 static constexpr uint32_t GGML_KLEIDIAI_PACK_MAGIC       = 0x4b4c4149; // "KLAI"
 static constexpr uint16_t GGML_KLEIDIAI_PACK_VERSION     = 1;
@@ -645,8 +649,7 @@ static void transpose_f32kxn_f16nxk(size_t n, size_t k, float * dst, const uint1
     }
 }
 
-class tensor_traits : public ggml::cpu::tensor_traits {
-    bool work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) override {
+    bool tensor_traits:: work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) {
         if (op->op != GGML_OP_MUL_MAT) {
             return false;
         }
@@ -787,7 +790,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
         return false;
     }
 
-    bool compute_forward(struct ggml_compute_params * params, struct ggml_tensor * dst) override {
+    bool tensor_traits::compute_forward(struct ggml_compute_params * params, struct ggml_tensor * dst)  {
         if (dst->op == GGML_OP_MUL_MAT) {
             if (dst->src[0]->type == GGML_TYPE_Q4_0 || dst->src[0]->type == GGML_TYPE_Q8_0) {
                 return compute_forward_qx(params, dst);
@@ -804,7 +807,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
         return false;
     }
 
-    bool compute_forward_f32(ggml_compute_params * params, struct ggml_tensor * dst) {
+    bool tensor_traits::compute_forward_f32(ggml_compute_params * params, struct ggml_tensor * dst) {
         GGML_ASSERT(dst->src[0]->type == GGML_TYPE_F32);
 
         const ggml_tensor * src0 = dst->src[0];
@@ -955,7 +958,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
         return true;
     }
 
-    bool compute_forward_fp16(ggml_compute_params * params, struct ggml_tensor * dst) {
+    bool tensor_traits::compute_forward_fp16(ggml_compute_params * params, struct ggml_tensor * dst) {
         const ggml_tensor * src0 = dst->src[0];
         const ggml_tensor * src1 = dst->src[1];
 
@@ -1106,7 +1109,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
         return true;
     }
 
-    bool compute_forward_qx(struct ggml_compute_params * params, struct ggml_tensor * dst) {
+    bool  tensor_traits::compute_forward_qx(struct ggml_compute_params * params, struct ggml_tensor * dst) {
         GGML_ASSERT(dst->src[0]->type == GGML_TYPE_Q4_0 || dst->src[0]->type == GGML_TYPE_Q8_0);
 
         const ggml_tensor * src0 = dst->src[0];
@@ -1470,7 +1473,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
         return true;
     }
 
-    bool compute_forward_get_rows(struct ggml_compute_params * params, struct ggml_tensor * dst) {
+    bool tensor_traits::compute_forward_get_rows(struct ggml_compute_params * params, struct ggml_tensor * dst) {
         GGML_ASSERT(dst->src[0]->type == GGML_TYPE_Q4_0 || dst->src[0]->type == GGML_TYPE_Q8_0);
         const ggml_tensor * src0 = dst->src[0];
         const ggml_tensor * src1 = dst->src[1];
@@ -1563,7 +1566,7 @@ class tensor_traits : public ggml::cpu::tensor_traits {
     }
 
 public:
-    int repack(struct ggml_tensor * tensor, const void * data, size_t data_size) {
+    int tensor_traits::repack(struct ggml_tensor * tensor, const void * data, size_t data_size) {
         GGML_ASSERT(tensor->type == GGML_TYPE_Q4_0 || tensor->type == GGML_TYPE_Q8_0 || tensor->type == GGML_TYPE_F32);
         const size_t n = tensor->ne[1];
         const size_t k = tensor->ne[0];
@@ -1707,7 +1710,7 @@ public:
 
         return 0;
     }
-};
+
 
 static ggml::cpu::tensor_traits * get_tensor_traits(ggml_backend_buffer_t, struct ggml_tensor *) {
     static tensor_traits traits;
@@ -1816,8 +1819,7 @@ static size_t ggml_backend_cpu_kleidiai_buffer_type_get_alloc_size(ggml_backend_
 }
 
 namespace ggml::cpu::kleidiai {
-class extra_buffer_type : ggml::cpu::extra_buffer_type {
-    bool supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) override {
+    bool extra_buffer_type::supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) {
         std::array<ggml_kleidiai_kernels *, GGML_KLEIDIAI_MAX_KERNEL_SLOTS> kernel_chain;
         const int slot_total = kleidiai_collect_kernel_chain(op, kernel_chain);
         const bool src0_is_kleidiai =
@@ -1860,9 +1862,13 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         return false;
     }
 
-    ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override {
+    ggml::cpu::tensor_traits * extra_buffer_type::get_tensor_traits(const struct ggml_tensor * op) {
         if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_GET_ROWS) {
-            if (op->src[0]->buffer && op->src[0]->buffer->buft->context == this) {
+            if (op->src[0]->buffer && (op->src[0]->buffer->buft == ggml_backend_cpu_kleidiai_buffer_type()
+	#ifdef GGML_USE_CPU_HBM
+	     || op->src[0]->buffer->buft == ggml_backend_cpu_hbm_buffer_type()
+	#endif
+				    )) {
                 return (ggml::cpu::tensor_traits *) op->src[0]->extra;
             } else {
                 // KleidiAI only has kernels for Q4_0 and Q8_0. For a quantized weight of any
@@ -1895,7 +1901,6 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         }
         return nullptr;
     }
-};
 }  // namespace ggml::cpu::kleidiai
 
 ggml_backend_buffer_type_t ggml_backend_cpu_kleidiai_buffer_type(void) {

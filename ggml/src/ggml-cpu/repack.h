@@ -9,6 +9,39 @@
 // GGML internal header
 
 ggml_backend_buffer_type_t ggml_backend_cpu_repack_buffer_type(void);
+namespace ggml::cpu::repack {
+
+class tensor_traits_base: public ggml::cpu::tensor_traits
+{
+public:
+virtual int repack(struct ggml_tensor * tensor, const void * data, size_t data_size) =0;
+
+};
+
+template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> class tensor_traits : public tensor_traits_base {
+public:
+bool work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) override;
+bool compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op) override;
+void forward_mul_mat(ggml_compute_params * params, ggml_tensor * op);
+void forward_mul_mat_id(ggml_compute_params * params, ggml_tensor * op); 
+void forward_mul_mat_one_chunk(ggml_compute_params * params,
+                                   ggml_tensor *         op,
+                                   int64_t               src0_start,
+                                   int64_t               src0_end,
+                                   int64_t               src1_start,
+                                   int64_t               src1_end) ;
+int repack(struct ggml_tensor * tensor, const void * data, size_t data_size) override;
+};
+
+class extra_buffer_type: ggml::cpu::extra_buffer_type
+{public:
+bool supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) override;
+ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override;
+};
+}// namespace ggml::cpu::repack
+
+
+
 
 template <int K> constexpr int QK_0() {
     if constexpr (K == 1) {

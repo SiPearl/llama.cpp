@@ -15,25 +15,26 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#ifdef GGML_USE_CPU_HBM
+#include "hbm.h"
+#endif
 
 #if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
 
 // AMX type_trais
 namespace ggml::cpu::amx {
-class tensor_traits : public ggml::cpu::tensor_traits {
-    bool work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) override {
+    bool tensor_traits::work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size)  {
         size = ggml_backend_amx_desired_wsize(op);
         return true;
     }
 
-    bool compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op) override {
+    bool tensor_traits::compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op)  {
         if (op->op == GGML_OP_MUL_MAT) {
             ggml_backend_amx_mul_mat(params, op);
             return true;
         }
         return false;
     }
-};
 
 static ggml::cpu::tensor_traits * get_tensor_traits(ggml_backend_buffer_t, struct ggml_tensor *) {
     static tensor_traits traits;
@@ -141,8 +142,7 @@ static size_t ggml_backend_amx_buffer_type_get_alignment(ggml_backend_buffer_typ
 }
 
 namespace ggml::cpu::amx {
-class extra_buffer_type : ggml::cpu::extra_buffer_type {
-    bool supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) override {
+bool extra_buffer_type::supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) {
         if (op->op != GGML_OP_MUL_MAT) {
             return false;
         }
@@ -152,7 +152,7 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         if (!ggml_is_contiguous(src0) || !ggml_is_contiguous(src1)) {
             return false;
         }
-        if (!src0->buffer || src0->buffer->buft != ggml_backend_amx_buffer_type()) {
+        if (!src0->buffer || src0->buffer->buft != ggml_backend_amx_buffer_type() ) {
             return false;
         }
         if (src1->buffer && !ggml_backend_buft_is_host(src1->buffer->buft)) {
@@ -186,18 +186,22 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         if (src1->type != GGML_TYPE_F32) {
             return false;
         }
-        return true;
-    }
+	return true;
 
-    ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override {
+     }
+
+    ggml::cpu::tensor_traits * extra_buffer_type::get_tensor_traits(const struct ggml_tensor * op)  {
         if (op->op == GGML_OP_MUL_MAT && op->src[0]->buffer &&
-            op->src[0]->buffer->buft == ggml_backend_amx_buffer_type()) {
+            (op->src[0]->buffer->buft == ggml_backend_amx_buffer_type() 
+	#ifdef GGML_USE_CPU_HBM
+	     || op->src[0]->buffer->buft == ggml_backend_cpu_hbm_buffer_type() 
+	#endif
+	     )) {
             return (ggml::cpu::tensor_traits *) op->src[0]->extra;
         }
 
         return nullptr;
     }
-};
 }  // namespace ggml::cpu::amx
 
 static size_t ggml_backend_amx_buffer_type_get_alloc_size(ggml_backend_buffer_type_t buft, const ggml_tensor * tensor) {

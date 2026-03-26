@@ -11,7 +11,7 @@
 #include <vector>
 
 #ifdef GGML_USE_CPU_HBM
-#    include "hbm.h"
+#include "hbm.h"
 #endif
 
 #ifdef GGML_USE_CPU_KLEIDIAI

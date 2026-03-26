@@ -90,13 +90,15 @@ function(ggml_add_cpu_backend_variant_impl tag_name)
     endif()
 
     if (GGML_CPU_HBM)
-        find_library(memkind memkind REQUIRED)
+        find_library(memkind memkind REQUIRED HINTS $ENV{HOME}/memkind/lib)
 
         message(STATUS "Using memkind for CPU HBM")
 
         target_compile_definitions(${GGML_CPU_NAME} PRIVATE GGML_USE_CPU_HBM)
+	target_include_directories(${GGML_CPU_NAME} PRIVATE "$ENV{HOME}/memkind/include")
+	target_include_directories(${GGML_CPU_NAME} PRIVATE "$ENV{HOME}/memkind/lib")
+	target_link_libraries(${GGML_CPU_NAME} PUBLIC $ENV{HOME}/memkind/lib/libmemkind.so)
 
-        target_link_libraries(${GGML_CPU_NAME} PUBLIC memkind)
     endif()
 
     if (GGML_SYSTEM_ARCH STREQUAL "ARM")

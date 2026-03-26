@@ -18,6 +18,10 @@
 
 #include "repack.h"
 
+#ifdef GGML_USE_CPU_HBM
+#include "hbm.h"
+#endif
+
 #if defined(__GNUC__)
 #pragma GCC diagnostic ignored "-Woverlength-strings"
 #endif
@@ -4547,14 +4551,9 @@ template <> void gemm<block_q2_K, 1, 16, GGML_TYPE_Q8_K>(int n, float * s, size_
 }
 #endif
 
-class tensor_traits_base : public ggml::cpu::tensor_traits {
-  public:
-    virtual int repack(struct ggml_tensor * t, const void * data, size_t data_size) = 0;
-};
 
-template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> class tensor_traits : public tensor_traits_base {
-
-    bool work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) override {
+template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE>
+bool tensor_traits<BLOC_TYPE,INTER_SIZE,NB_COLS,PARAM_TYPE>::work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) {
         // not realy a GGML_TYPE_Q8_0 but same size.
         switch (op->op) {
             case GGML_OP_MUL_MAT:
@@ -4583,7 +4582,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         return false;
     }
 
-    bool compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op) override {
+    template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE>  bool tensor_traits<BLOC_TYPE,INTER_SIZE,NB_COLS,PARAM_TYPE>::compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op) {
         switch (op->op) {
             case GGML_OP_MUL_MAT:
                 forward_mul_mat(params, op);
@@ -4598,7 +4597,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         return false;
     }
 
-    void forward_mul_mat_one_chunk(ggml_compute_params * params,
+       template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> void  tensor_traits<BLOC_TYPE,INTER_SIZE,NB_COLS,PARAM_TYPE>::forward_mul_mat_one_chunk(ggml_compute_params * params,
                                    ggml_tensor *         op,
                                    int64_t               src0_start,
                                    int64_t               src0_end,
@@ -4647,7 +4646,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         }
     }
 
-    void forward_mul_mat(ggml_compute_params * params, ggml_tensor * op) {
+    template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> void  tensor_traits<BLOC_TYPE,INTER_SIZE,NB_COLS,PARAM_TYPE>::forward_mul_mat(ggml_compute_params * params, ggml_tensor * op) {
         const ggml_tensor * src0 = op->src[0];
         const ggml_tensor * src1 = op->src[1];
         ggml_tensor *       dst  = op;
@@ -4780,7 +4779,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         }
     }
 
-    void forward_mul_mat_id(ggml_compute_params * params, ggml_tensor * op) {
+    template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> void  tensor_traits<BLOC_TYPE,INTER_SIZE,NB_COLS,PARAM_TYPE>::forward_mul_mat_id(ggml_compute_params * params, ggml_tensor * op) {
         const ggml_tensor * src0 = op->src[0];
         const ggml_tensor * src1 = op->src[1];
         const ggml_tensor * ids  = op->src[2];
@@ -4913,12 +4912,12 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
 #undef MMID_MATRIX_ROW
     }
 
-    int repack(struct ggml_tensor * t, const void * data, size_t data_size) override {
+    template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> int  tensor_traits<BLOC_TYPE,INTER_SIZE,NB_COLS,PARAM_TYPE>::tensor_traits::repack(struct ggml_tensor * t, const void * data, size_t data_size) {
         GGML_LOG_DEBUG("%s: repack tensor %s with %s_%dx%d\n", __func__, t->name, ggml_type_name(t->type),
                        (int) NB_COLS, (int) INTER_SIZE);
         return ggml::cpu::repack::repack<BLOC_TYPE, INTER_SIZE, NB_COLS>(t, data, data_size);
     }
-};
+
 
 }  // namespace ggml::cpu::repack
 
@@ -5187,8 +5186,7 @@ static size_t ggml_backend_cpu_repack_buffer_type_get_alignment(ggml_backend_buf
 }
 
 namespace ggml::cpu::repack {
-class extra_buffer_type : ggml::cpu::extra_buffer_type {
-    bool supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) override {
+bool extra_buffer_type::supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) {
         if (    op->op == GGML_OP_MUL_MAT &&
                 op->src[0]->buffer &&
                 (ggml_n_dims(op->src[0]) == 2) &&
@@ -5223,16 +5221,19 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
         }
         return false;
     }
-
-    ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override {
+    ggml::cpu::tensor_traits * extra_buffer_type::get_tensor_traits(const struct ggml_tensor * op) {
         if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_MUL_MAT_ID) {
-            if (op->src[0]->buffer && op->src[0]->buffer->buft == ggml_backend_cpu_repack_buffer_type()) {
+            if (op->src[0]->buffer && (
+			    op->src[0]->buffer->buft == ggml_backend_cpu_repack_buffer_type()
+		#ifdef GGML_USE_CPU_HBM
+			|| op->src[0]->buffer->buft == ggml_backend_cpu_hbm_buffer_type()
+		#endif	  
+			    )) {
                 return (ggml::cpu::tensor_traits *) op->src[0]->extra;
             }
         }
         return nullptr;
     }
-};
 }  // namespace ggml::cpu::repack
 
 ggml_backend_buffer_type_t ggml_backend_cpu_repack_buffer_type(void) {

@@ -208,6 +208,19 @@ add_library(ggml-base
             ggml-quants.h
             gguf.cpp)
 
+if (GGML_CPU_HBM)
+            message(STATUS "Using memkind for CPU HBM")
+            find_library(memkind memkind REQUIRED HINTS $ENV{HOME}/memkind/lib)
+
+        message(STATUS "Using memkind for CPU HBM")
+
+	target_compile_definitions(ggml-base PRIVATE GGML_USE_CPU_HBM)
+	target_include_directories(ggml-base PUBLIC "$ENV{HOME}/memkind/include")
+	target_include_directories(ggml-base PUBLIC "$ENV{HOME}/memkind/lib")
+	target_include_directories(ggml-base PUBLIC "$ENV{HOME}/memkind/include/memkind/internal")   
+endif()
+
+
 set_target_properties(ggml-base PROPERTIES
     VERSION ${GGML_VERSION}
     SOVERSION ${GGML_VERSION_MAJOR}
