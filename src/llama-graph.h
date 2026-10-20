@@ -1115,6 +1115,11 @@ struct llm_graph_context {
               ggml_tensor * w_s   = nullptr,
               ggml_tensor * slots = nullptr) const;
 
+    // rescale `cur` (the src1 of a matmul) by a power of two, computed from its maximum absolute
+    // when the values already fit in F16, the factors are exactly 1.0f
+              ggml_tensor * cur,
+              ggml_tensor * & scale_s) const;
+
     ggml_tensor * build_norm(
              ggml_tensor * cur,
              ggml_tensor * mw,
