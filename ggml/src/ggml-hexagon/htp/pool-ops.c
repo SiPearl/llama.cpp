@@ -271,15 +271,15 @@ static void pool_2d_thread(unsigned int nth, unsigned int ith, void * data) {
     struct htp_thread_trace * tr = &ctx->octx->ctx->trace[ith];
     dma_queue * dma_queue = ctx->octx->ctx->dma[ith];
 
-    const uint32_t src_spad_half = p->src_plane_bytes_aligned;
-    const uint32_t dst_spad_half = p->dst_plane_bytes_aligned;
-    const uint32_t src_bytes_per_thread = 2 * src_spad_half;
-    const uint32_t dst_bytes_per_thread = 2 * dst_spad_half;
-    const size_t off_dst = (size_t) ctx->n_threads * src_bytes_per_thread;
+    struct htp_pool_vtcm_layout layout;
+    htp_pool_vtcm_layout_build(&layout, p->src_plane_bytes_aligned, p->dst_plane_bytes_aligned, ctx->n_threads);
+
+    const uint32_t src_spad_half = (uint32_t) layout.src_spad_half_size;
+    const uint32_t dst_spad_half = (uint32_t) layout.dst_spad_half_size;
 
     uint8_t * vtcm_base = (uint8_t *) ctx->octx->ctx->vtcm_base;
-    uint8_t * src_spad  = vtcm_base + ith * src_bytes_per_thread;
-    uint8_t * dst_spad  = vtcm_base + off_dst + ith * dst_bytes_per_thread;
+    uint8_t * src_spad  = VTCM_LAYOUT_PTR(uint8_t, vtcm_base, layout.off_src) + ith * layout.src_bytes_per_thread;
+    uint8_t * dst_spad  = VTCM_LAYOUT_PTR(uint8_t, vtcm_base, layout.off_dst) + ith * layout.dst_bytes_per_thread;
 
     float * srcb2[2] = { (float *) src_spad, (float *) (src_spad + src_spad_half) };
     float * dstb2[2] = { (float *) dst_spad, (float *) (dst_spad + dst_spad_half) };
@@ -342,11 +342,6 @@ int op_pool_2d(struct htp_ops_context * octx) {
     const struct htp_pool_2d_kernel_params * p =
         (const struct htp_pool_2d_kernel_params *) octx->kernel_params;
 
-    if (src0->type != HTP_TYPE_F32 || dst->type != HTP_TYPE_F32 ||
-        (p->pool_op != HTP_POOL_AVG && p->pool_op != HTP_POOL_MAX)) {
-        return HTP_STATUS_NO_SUPPORT;
-    }
-
     uint32_t plane_start = 0;
     uint32_t plane_count = p->planes;
     if (octx->ctx->mdev.count > 1) {
@@ -369,16 +364,12 @@ int op_pool_2d(struct htp_ops_context * octx) {
     const uint32_t planes_per_thread = fastdiv(plane_count + n_threads - 1, &octx->n_threads_div);
 
     pool_plane_fn_t pool_plane;
-    if (p->global_path) {
-        pool_plane = pool_plane_global;
-    } else if (p->block_path) {
-        pool_plane = pool_plane_block;
-    } else if (p->narrow_path) {
-        pool_plane = pool_plane_hvx_narrow;
-    } else if (p->fast_path) {
-        pool_plane = pool_plane_hvx;
-    } else {
-        pool_plane = pool_plane_general;
+    switch (p->kernel_type) {
+        case HTP_POOL_KERNEL_GLOBAL:     pool_plane = pool_plane_global;     break;
+        case HTP_POOL_KERNEL_BLOCK:      pool_plane = pool_plane_block;      break;
+        case HTP_POOL_KERNEL_HVX_NARROW: pool_plane = pool_plane_hvx_narrow; break;
+        case HTP_POOL_KERNEL_HVX:        pool_plane = pool_plane_hvx;        break;
+        default:                         pool_plane = pool_plane_general;    break;
     }
 
     struct pool_2d_context ctx = {

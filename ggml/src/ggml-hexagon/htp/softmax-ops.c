@@ -496,7 +496,7 @@ static int execute_op_softmax_f32(struct htp_ops_context * octx) {
         return HTP_STATUS_INVAL_PARAMS;
     }
 
-    if (kparams->kernel_id >= HTP_SOFTMAX_KERNEL_COUNT) {
+    if (kparams->kernel_type >= HTP_SOFTMAX_KERNEL_COUNT) {
         return HTP_STATUS_INVAL_PARAMS;
     }
 
@@ -532,22 +532,26 @@ static int execute_op_softmax_f32(struct htp_ops_context * octx) {
     const uint32_t n_threads = octx->n_threads;
     uint8_t * const vtcm_base = (uint8_t *) octx->ctx->vtcm_base;
 
-    const uint32_t off_src0 = 0;
-    const uint32_t off_dst  = off_src0 + kparams->vtcm_src0_size_per_thread * kparams->n_threads;
-    const uint32_t off_src1 = off_dst  + kparams->vtcm_dst_size_per_thread  * kparams->n_threads;
+    struct htp_softmax_vtcm_layout layout;
+    htp_softmax_vtcm_layout_build(&layout,
+                                  src0->ne[0],
+                                  kparams->use_src1 ? octx->src[1]->ne[0] : 0,
+                                  kparams->use_src1 != 0,
+                                  kparams->use_f16 != 0,
+                                  kparams->n_threads);
 
     struct htp_softmax_context smctx = {
         .octx                  = octx,
         .kparams               = kparams,
-        .compute               = (void *) softmax_kernels[kparams->kernel_id],
+        .compute               = (void *) softmax_kernels[kparams->kernel_type],
 
         .data_src0             = src0->data,
         .data_src1             = kparams->use_src1 ? octx->src[1]->data : 0,
         .data_dst              = dst->data,
 
-        .vtcm_src0             = VTCM_LAYOUT_PTR(uint8_t, vtcm_base, off_src0),
-        .vtcm_dst              = VTCM_LAYOUT_PTR(uint8_t, vtcm_base, off_dst),
-        .vtcm_src1             = VTCM_LAYOUT_PTR_OPTIONAL(uint8_t, vtcm_base, off_src1, kparams->use_src1),
+        .vtcm_src0             = VTCM_LAYOUT_PTR(uint8_t, vtcm_base, layout.off_src0),
+        .vtcm_dst              = VTCM_LAYOUT_PTR(uint8_t, vtcm_base, layout.off_dst),
+        .vtcm_src1             = VTCM_LAYOUT_PTR_OPTIONAL(uint8_t, vtcm_base, layout.off_src1, kparams->use_src1),
 
         .vtcm_src0_size_per_thread = kparams->vtcm_src0_size_per_thread,
         .vtcm_src1_size_per_thread = kparams->vtcm_src1_size_per_thread,
