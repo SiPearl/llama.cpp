@@ -27,14 +27,16 @@ struct moe_cache_slru {
     int32_t tail[2] = { -1, -1 };
     std::vector<bool> is_protected;
     int32_t n_protected = 0;
+    int32_t max_protected = 0; // zero for plain LRU
 
     std::vector<uint32_t> seen; // [n_expert]
     uint32_t seen_gen = 0;
     std::vector<int32_t> uniq;
 
-    void init(int32_t n_layer, int32_t n_expert, int32_t n_slots) {
+    void init(int32_t n_layer, int32_t n_expert, int32_t n_slots, int32_t max_protected) {
         this->n_expert = n_expert;
         this->n_slots  = n_slots;
+        this->max_protected = max_protected;
         slot_map.assign(n_layer, nullptr);
         key_of.assign(n_slots, -1);
         prev.resize(n_slots);
@@ -79,8 +81,8 @@ struct moe_cache_slru {
     }
 
     void touch(int32_t s) {
-        move(s, true);
-        if (n_protected > n_slots/2) {
+        move(s, max_protected > 0);
+        if (n_protected > max_protected) {
             move(head[1], false);
         }
     }
@@ -352,17 +354,18 @@ struct llama_moe_cache::impl {
             while (g.n_slots < max_slots && alloc_size(g, g.n_slots + 1) <= budget) {
                 g.n_slots++;
             }
-            if (g.n_slots < n_expert_used) {
-                LLAMA_LOG_WARN("%s: MoE cache budget is too small for %zu layers, they are not cached\n", __func__, g.layers.size());
-                g.n_slots = 0;
-                continue;
+            int64_t n_expert_token = 0;
+            for (int32_t il : g.layers) {
+                n_expert_token += model.hparams.n_expert_used(il);
             }
-            g.slru.init(model.layers.size(), n_expert, g.n_slots);
+            if (g.n_slots < n_expert_token) {
+                throw std::runtime_error("MoE cache is too small to hold the experts of one token");
+            }
+            // use plain LRU below 1.8 times the experts used by one token
+            const int32_t max_protected = 5LL*g.n_slots >= 9*n_expert_token ? g.n_slots/2 : 0;
+            g.slru.init(model.layers.size(), n_expert, g.n_slots, max_protected);
             n_tensors[g.id] += g.ref.size()*(1 + g.layers.size());
             n_tensors_host  += g.layers.size();
-        }
-        if (n_tensors_host == 0) {
-            throw std::runtime_error("MoE cache is too small to hold the experts of one token");
         }
 
         auto init_ctx = [](size_t n_tensors) {
